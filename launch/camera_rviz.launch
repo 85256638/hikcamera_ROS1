@@ -1,0 +1,11 @@
+<launch>
+  <!-- Launch the camera driver node -->
+  <node pkg="hik_camera_driver" name="camera_driver" type="camera_driver" output="screen">
+    <rosparam file="$(find hik_camera_driver)/config/camera.yaml" command="load"/>
+  </node>
+
+  <!-- Launch RViz with your configuration -->
+  <node pkg="rviz" name="rviz" type="rviz" output="screen"
+        args="-d $(find hik_camera_driver)/config/camera_rviz.rviz"/>
+</launch>
+
