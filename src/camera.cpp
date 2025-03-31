@@ -62,6 +62,44 @@ namespace HIKCAMERA
         private_nh.param<float>("Camera/Gamma_value", Gamma_value, 1.0);
         private_nh.param<int>("Camera/Gamma_selector", Gamma_selector, 1);
         private_nh.param<bool>("Camera/Exposure_control", exposure_control, false);
+        
+        // Offset parameters
+    int offsetX, offsetY;
+    private_nh.param<int>("Camera/offsetX", offsetX, 0);   // Default offsetX = 0
+    private_nh.param<int>("Camera/offsetY", offsetY, 0);   // Default offsetY = 0
+    ROS_INFO_STREAM("Setting offsets to: offsetX = " << offsetX << ", offsetY = " << offsetY);
+
+    // Set offsetX and offsetY using the camera SDK
+    nRet = MV_CC_SetIntValue(m_handle, "OffsetX", offsetX);
+    if (MV_OK != nRet)
+    {
+        ROS_ERROR("Failed to set OffsetX! nRet [%x]", nRet);
+        return false;
+    }
+    nRet = MV_CC_SetIntValue(m_handle, "OffsetY", offsetY);
+    if (MV_OK != nRet)
+    {
+        ROS_ERROR("Failed to set OffsetY! nRet [%x]", nRet);
+        return false;
+    }
+
+        // Add resolution parameters:
+        int width, height;
+        private_nh.param<int>("Camera/width", width, 1280);   // Default width = 1280
+        private_nh.param<int>("Camera/height", height, 1024);  // Default height = 1024
+        ROS_INFO_STREAM("Setting resolution to: " << width << "x" << height);
+        nRet = MV_CC_SetIntValue(m_handle, "Width", width);
+        if (MV_OK != nRet)
+        {
+            ROS_ERROR("Failed to set width! nRet [%x]", nRet);
+            return false;
+        }
+        nRet = MV_CC_SetIntValue(m_handle, "Height", height);
+        if (MV_OK != nRet)
+        {
+            ROS_ERROR("Failed to set height! nRet [%x]", nRet);
+            return false;
+        }
 
         exposure_time_set = Exposure_time;
         exposure_auto = Exposure;
