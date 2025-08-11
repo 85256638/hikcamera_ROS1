@@ -1,15 +1,15 @@
 camera_name: camera
 Camera:
   # 相机序列号
-  serial_number: DA3905680
+  serial_number: K55863760
   # 相机内参文件 package://my_cameras/calibrations/${NAME}.yaml
   cam_info_url: package://hik_camera_driver/config/ost.yaml
   # 帧率
   frame_rate: 10.0
   
   # Resolution parameters
-  width: 1280
-  height: 1024
+  width: 3072
+  height: 2048
 
   # Offset parameters
   offsetX: 0  # Default offsetX value
@@ -53,9 +53,9 @@ Camera:
   # 0:Off
   # 1:Once
   # 2:Continuous
-  Gain_mode: 0
+  Gain_mode: 2
   # 增益值 ≥0.0 ，单位 dB
-  Gain_value: 12
+  Gain_value: 22
 
   # 数字偏移使能
   Digital_shift_mode: false
