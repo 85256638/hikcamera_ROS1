@@ -43,7 +43,7 @@ Camera:
   # 曝光时间 ≥0.0 ，单位 us
   Exposure_time: 100
   # 自动曝光时间上限
-  ExposureTimeUp: 500000
+  ExposureTimeUp: 600000
   # 自动曝光时间下限
   ExposureTimeLow: 100
   # 程序控制曝光，仅当自动曝光设为手动时启用
@@ -55,7 +55,7 @@ Camera:
   # 2:Continuous
   Gain_mode: 2
   # 增益值 ≥0.0 ，单位 dB
-  Gain_value: 22
+  Gain_value: 24
 
   # 数字偏移使能
   Digital_shift_mode: false
