@@ -8,8 +8,8 @@ Camera:
   frame_rate: 10.0
   
   # Resolution parameters
-  width: 3072
-  height: 2048
+  width: 1536
+  height: 1024
 
   # Offset parameters
   offsetX: 0  # Default offsetX value
@@ -43,7 +43,7 @@ Camera:
   # 曝光时间 ≥0.0 ，单位 us
   Exposure_time: 100
   # 自动曝光时间上限
-  ExposureTimeUp: 600000
+  ExposureTimeUp: 220000
   # 自动曝光时间下限
   ExposureTimeLow: 100
   # 程序控制曝光，仅当自动曝光设为手动时启用
@@ -55,7 +55,7 @@ Camera:
   # 2:Continuous
   Gain_mode: 2
   # 增益值 ≥0.0 ，单位 dB
-  Gain_value: 24
+  Gain_value: 20
 
   # 数字偏移使能
   Digital_shift_mode: false

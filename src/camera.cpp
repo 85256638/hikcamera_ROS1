@@ -13,6 +13,9 @@ namespace HIKCAMERA
     float g_dynamic_framerate = 0.0;
     int g_resolution_width = 0;
     int g_resolution_height = 0;
+    
+    // Global variable for reconnection - WorkThread needs to signal reconnection needed
+    volatile bool g_reconnection_needed = false;
 
     Hik_camera_base::Hik_camera_base(ros::NodeHandle &nh, ros::NodeHandle &private_nh)
     {
@@ -24,6 +27,11 @@ namespace HIKCAMERA
         cinfo_.reset(new camera_info_manager::CameraInfoManager(nh, camera_name, cam_info_url));
         camera_pub = it.advertiseCamera(camera_name + "/image", 1);
         // exposure_sub = nh.subscribe<std_msgs::Float32>(camera_name + "/set_exposure", 10, boost::bind(&Hik_camera_base::exposure_callback, this, _1));
+        
+        // Initialize reconnection related variables
+        reconnecting = false;
+        pthread_mutex_init(&reconnect_mutex, NULL);
+        saved_serial_number = "";
     }
 
     bool Hik_camera_base::set_params()
@@ -210,6 +218,17 @@ namespace HIKCAMERA
     bool Hik_camera_base::set_camera(MV_CC_DEVICE_INFO &camera)
     {
         m_stDevInfo = camera;
+        
+        // Save serial number for reconnection
+        if (m_stDevInfo.nTLayerType == MV_GIGE_DEVICE)
+        {
+            saved_serial_number = std::string((char *)m_stDevInfo.SpecialInfo.stGigEInfo.chSerialNumber);
+        }
+        else if (m_stDevInfo.nTLayerType == MV_USB_DEVICE)
+        {
+            saved_serial_number = std::string((char *)m_stDevInfo.SpecialInfo.stUsb3VInfo.chSerialNumber);
+        }
+        
         nRet = MV_CC_CreateHandle(&m_handle, &m_stDevInfo);
         if (MV_OK != nRet)
         {
@@ -348,7 +367,15 @@ namespace HIKCAMERA
         nRet = MV_CC_GetFloatValue(m_handle, name.c_str(), &temp_value);
         if (MV_OK != nRet)
         {
-            ROS_ERROR("get %s failed! nRet [%x]\n", name.c_str(), nRet);
+            if (isNetworkError(nRet))
+            {
+                ROS_WARN("Network error detected while getting %s! nRet [%x]. Reconnection will be attempted.\n", name.c_str(), nRet);
+                g_reconnection_needed = true;
+            }
+            else
+            {
+                ROS_ERROR("get %s failed! nRet [%x]\n", name.c_str(), nRet);
+            }
             return false;
         }
         value = temp_value.fCurValue;
@@ -533,6 +560,19 @@ namespace HIKCAMERA
                     last_time = current_time;
                 }
             }
+            else if (nRet != MV_E_GC_TIMEOUT)
+            {
+                // Check for network errors (timeout is acceptable and will retry)
+                if (nRet == MV_E_NETER || nRet == MV_E_BUSY || nRet == MV_E_PACKET || 
+                    nRet == MV_E_HANDLE || nRet == MV_E_PRECONDITION)
+                {
+                    ROS_WARN("Network error detected in WorkThread! nRet [%x]. Reconnection will be attempted.", nRet);
+                    g_reconnection_needed = true;
+                    // Wait a bit before exiting to avoid frequent reconnection attempts
+                    ros::Duration(0.5).sleep();
+                    break; // Exit WorkThread, main loop will handle reconnection
+                }
+            }
         }
         if (pData)
         {
@@ -579,6 +619,177 @@ namespace HIKCAMERA
             }
         }
         pthread_mutex_unlock(&mutex);
+    }
+
+    bool Hik_camera_base::isNetworkError(int error_code)
+    {
+        // Check for network-related error codes
+        return (error_code == MV_E_NETER ||        // Network error
+                error_code == MV_E_BUSY ||         // Device busy or network disconnected
+                error_code == MV_E_PACKET ||       // Network packet error
+                error_code == MV_E_HANDLE ||       // Invalid handle (might indicate disconnection)
+                error_code == MV_E_PRECONDITION);  // Precondition error (environment changed)
+    }
+
+    void Hik_camera_base::stopStreamInternal()
+    {
+        if (m_handle == NULL)
+            return;
+            
+        int ret = MV_CC_StopGrabbing(m_handle);
+        if (MV_OK != ret)
+        {
+            ROS_WARN("MV_CC_StopGrabbing fail! nRet [%x]\n", ret);
+        }
+        ret = MV_CC_CloseDevice(m_handle);
+        if (MV_OK != ret)
+        {
+            ROS_WARN("MV_CC_CloseDevice fail! nRet [%x]\n", ret);
+        }
+        ret = MV_CC_DestroyHandle(m_handle);
+        if (MV_OK != ret)
+        {
+            ROS_WARN("MV_CC_DestroyHandle fail! nRet [%x]\n", ret);
+        }
+        m_handle = NULL;
+    }
+
+    bool Hik_camera_base::reconnect_camera()
+    {
+        pthread_mutex_lock(&reconnect_mutex);
+        if (reconnecting)
+        {
+            pthread_mutex_unlock(&reconnect_mutex);
+            return false; // Already reconnecting
+        }
+        reconnecting = true;
+        pthread_mutex_unlock(&reconnect_mutex);
+
+        ROS_WARN("Attempting to reconnect camera...");
+        
+        // Stop current stream and close device
+        stopStreamInternal();
+        
+        // Wait a bit before reconnecting
+        ros::Duration(1.0).sleep();
+        
+        // Find camera by serial number
+        std::vector<MV_CC_DEVICE_INFO> cameras;
+        int nRet = -1;
+        void *temp_handle = NULL;
+        unsigned int nTLayerType = MV_GIGE_DEVICE | MV_USB_DEVICE;
+        MV_CC_DEVICE_INFO_LIST m_stDevList = {0};
+        nRet = MV_CC_EnumDevices(nTLayerType, &m_stDevList);
+        if (MV_OK != nRet || m_stDevList.nDeviceNum == 0)
+        {
+            ROS_ERROR("Failed to enumerate devices during reconnection! nRet [%x]\n", nRet);
+            reconnecting = false;
+            return false;
+        }
+        
+        bool found = false;
+        for (int index = 0; index < m_stDevList.nDeviceNum; index++)
+        {
+            MV_CC_DEVICE_INFO temp_dev = {0};
+            memcpy(&temp_dev, m_stDevList.pDeviceInfo[index], sizeof(MV_CC_DEVICE_INFO));
+            
+            std::string temp_serial;
+            if (temp_dev.nTLayerType == MV_GIGE_DEVICE)
+            {
+                temp_serial = std::string((char *)temp_dev.SpecialInfo.stGigEInfo.chSerialNumber);
+            }
+            else if (temp_dev.nTLayerType == MV_USB_DEVICE)
+            {
+                temp_serial = std::string((char *)temp_dev.SpecialInfo.stUsb3VInfo.chSerialNumber);
+            }
+            
+            if (temp_serial == saved_serial_number)
+            {
+                m_stDevInfo = temp_dev;
+                found = true;
+                break;
+            }
+        }
+        
+        if (!found)
+        {
+            ROS_ERROR("Camera with serial number %s not found during reconnection!", saved_serial_number.c_str());
+            reconnecting = false;
+            return false;
+        }
+        
+        // Recreate handle and open device
+        nRet = MV_CC_CreateHandle(&m_handle, &m_stDevInfo);
+        if (MV_OK != nRet)
+        {
+            ROS_ERROR("Error: CreateHandle fail during reconnection! nRet [%x]\n", nRet);
+            reconnecting = false;
+            return false;
+        }
+        
+        unsigned int nAccessMode = MV_ACCESS_Exclusive;
+        unsigned short nSwitchoverKey = 0;
+        nRet = MV_CC_OpenDevice(m_handle, nAccessMode, nSwitchoverKey);
+        if (MV_OK != nRet)
+        {
+            ROS_ERROR("error: OpenDevice fail during reconnection! nRet [%x]\n", nRet);
+            MV_CC_DestroyHandle(m_handle);
+            m_handle = NULL;
+            reconnecting = false;
+            return false;
+        }
+        
+        // Reconfigure packet size for GigE cameras
+        if (m_stDevInfo.nTLayerType == MV_GIGE_DEVICE)
+        {
+            int nPacketSize = MV_CC_GetOptimalPacketSize(m_handle);
+            if (nPacketSize > 0)
+            {
+                nRet = MV_CC_SetIntValue(m_handle, "GevSCPSPacketSize", nPacketSize);
+                if (nRet != MV_OK)
+                {
+                    ROS_WARN("Warning: Set Packet Size fail during reconnection! nRet [0x%x]!\n", nRet);
+                }
+            }
+        }
+        
+        // Reapply parameters
+        if (!set_params())
+        {
+            ROS_ERROR("Failed to set parameters during reconnection!");
+            stopStreamInternal();
+            reconnecting = false;
+            return false;
+        }
+        
+        // Restart grabbing
+        nRet = MV_CC_StartGrabbing(m_handle);
+        if (MV_OK != nRet)
+        {
+            ROS_ERROR("MV_CC_StartGrabbing fail during reconnection! nRet [%x]\n", nRet);
+            stopStreamInternal();
+            reconnecting = false;
+            return false;
+        }
+        
+        // Restart WorkThread (old thread should have exited already when it detected the error)
+        // Wait a bit to ensure old thread has exited
+        ros::Duration(0.1).sleep();
+        nRet = pthread_create(&nThreadID, NULL, WorkThread, m_handle);
+        if (nRet != 0)
+        {
+            ROS_ERROR("Failed to recreate WorkThread during reconnection! ret = %d\n", nRet);
+            stopStreamInternal();
+            reconnecting = false;
+            return false;
+        }
+        
+        // Reset global reconnection flag
+        g_reconnection_needed = false;
+        reconnecting = false;
+        
+        ROS_INFO("Camera reconnected successfully and WorkThread restarted!");
+        return true;
     }
 
 } // namespace HIKCAMERA

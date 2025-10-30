@@ -25,6 +25,9 @@ namespace HIKCAMERA
     extern float g_dynamic_framerate;
     extern int g_resolution_width;
     extern int g_resolution_height;
+    
+    // Global variable for reconnection - WorkThread needs to signal reconnection needed
+    extern volatile bool g_reconnection_needed;
 
     class Hik_camera_base
     {
@@ -52,6 +55,9 @@ namespace HIKCAMERA
 
         bool changeExposureTime(float value);
         void exposure_callback(const std_msgs::Float32ConstPtr msg);
+        bool reconnect_camera();                   // Reconnect camera when network error occurs
+        bool isNetworkError(int error_code);       // Check if error code indicates network error
+        void stopStreamInternal();                 // Internal stop stream without mutex issues
 
     public:
         int nRet = -1;
@@ -67,6 +73,9 @@ namespace HIKCAMERA
         float exposure_time_up, exposure_time_low; // Upper and lower limits for exposure time
         float scale = 1.03;                        // Rate of change for exposure time
         float light_set;                           // Target brightness for exposure control
+        bool reconnecting = false;                 // Flag to prevent multiple reconnection attempts
+        pthread_mutex_t reconnect_mutex;           // Mutex for reconnection
+        std::string saved_serial_number;           // Store serial number for reconnection
     };
 
 } // namespace HIKCAMERA

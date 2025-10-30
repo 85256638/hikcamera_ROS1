@@ -125,22 +125,41 @@ int main(int argc, char **argv)
 #endif
     while (ros::ok())
     {
+        // Check if reconnection is needed
+        if (HIKCAMERA::g_reconnection_needed)
+        {
+            ROS_WARN("Reconnection flag detected, attempting to reconnect...");
+            if (camera.reconnect_camera())
+            {
+                // reconnect_camera() already restarts the WorkThread
+                ROS_INFO("Camera reconnected and streaming restarted.");
+            }
+            else
+            {
+                ROS_ERROR("Reconnection failed. Will retry later...");
+                ros::Duration(2.0).sleep(); // Wait 2 seconds before retrying
+            }
+        }
+        
         camera.ImagePub();
 #ifdef Debug
         i++;
         if (i % 100 == 0)
         {
             float gain, exposure_time, DigitalShift;
-            camera.getFloatValue("ExposureTime", exposure_time);
-            camera.getFloatValue("Gain", gain);
-            camera.getFloatValue("DigitalShift", DigitalShift);
-            ROS_INFO_STREAM("-----------------------");
-            ROS_INFO_STREAM("ExposureTime: " << exposure_time);
-            ROS_INFO_STREAM("Gain        : " << gain);
-            ROS_INFO_STREAM("DigitalShift: " << DigitalShift);
-            ROS_INFO_STREAM("Dynamic FrameRate: " << HIKCAMERA::g_dynamic_framerate << " FPS, Resolution: " 
-                << HIKCAMERA::g_resolution_width << "x" << HIKCAMERA::g_resolution_height);
-            ROS_INFO_STREAM("-----------------------");
+            // Try to get values, but don't fail if network error occurs
+            if (camera.getFloatValue("ExposureTime", exposure_time) &&
+                camera.getFloatValue("Gain", gain) &&
+                camera.getFloatValue("DigitalShift", DigitalShift))
+            {
+                ROS_INFO_STREAM("-----------------------");
+                ROS_INFO_STREAM("ExposureTime: " << exposure_time);
+                ROS_INFO_STREAM("Gain        : " << gain);
+                ROS_INFO_STREAM("DigitalShift: " << DigitalShift);
+                ROS_INFO_STREAM("Dynamic FrameRate: " << HIKCAMERA::g_dynamic_framerate << " FPS, Resolution: " 
+                    << HIKCAMERA::g_resolution_width << "x" << HIKCAMERA::g_resolution_height);
+                ROS_INFO_STREAM("-----------------------");
+            }
             i = 0;
         }
 #endif
