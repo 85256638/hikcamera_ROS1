@@ -1,8 +1,52 @@
 #include <hik_camera_driver/camera.h>
 #include <opencv2/imgproc/imgproc.hpp>  // For cvtColor if needed
+#include <map>
+#include <string>
 
 namespace HIKCAMERA
 {
+    // Helper function to convert pixel format string to enum value
+    unsigned int getPixelFormatFromString(const std::string& pixel_format_str)
+    {
+        // Create a map of common pixel format strings to enum values
+        static std::map<std::string, unsigned int> pixel_format_map = {
+            // Bayer formats
+            {"BayerGB10", PixelType_Gvsp_BayerGB10},
+            {"BayerGB8", PixelType_Gvsp_BayerGB8},
+            {"BayerGR8", PixelType_Gvsp_BayerGR8},
+            {"BayerRG8", PixelType_Gvsp_BayerRG8},
+            {"BayerBG8", PixelType_Gvsp_BayerBG8},
+            {"BayerGR10", PixelType_Gvsp_BayerGR10},
+            {"BayerRG10", PixelType_Gvsp_BayerRG10},
+            {"BayerBG10", PixelType_Gvsp_BayerBG10},
+            {"BayerGB12", PixelType_Gvsp_BayerGB12},
+            {"BayerGR12", PixelType_Gvsp_BayerGR12},
+            {"BayerRG12", PixelType_Gvsp_BayerRG12},
+            {"BayerBG12", PixelType_Gvsp_BayerBG12},
+            // Mono formats
+            {"Mono8", PixelType_Gvsp_Mono8},
+            {"Mono10", PixelType_Gvsp_Mono10},
+            {"Mono12", PixelType_Gvsp_Mono12},
+            {"Mono16", PixelType_Gvsp_Mono16},
+            // RGB formats
+            {"RGB8_Packed", PixelType_Gvsp_RGB8_Packed},
+            {"BGR8_Packed", PixelType_Gvsp_BGR8_Packed},
+            {"RGBA8_Packed", PixelType_Gvsp_RGBA8_Packed},
+            {"BGRA8_Packed", PixelType_Gvsp_BGRA8_Packed},
+        };
+        
+        // Try to find in map
+        auto it = pixel_format_map.find(pixel_format_str);
+        if (it != pixel_format_map.end())
+        {
+            return it->second;
+        }
+        
+        // If not found, return default (BayerGB10)
+        ROS_WARN_STREAM("Unknown pixel format: " << pixel_format_str << ", using default BayerGB10");
+        return PixelType_Gvsp_BayerGB10;
+    }
+
     sensor_msgs::ImagePtr frame; // Temporary storage for the current frame
     pthread_mutex_t mutex;       // Mutex for storing frame
     bool frame_empty = true;     // Flag indicating if a new frame is available for publishing
@@ -52,6 +96,7 @@ namespace HIKCAMERA
         bool Gamma;
         float Gamma_value;
         int Gamma_selector;
+        std::string pixel_format_str;
         private_nh.param<float>("Camera/frame_rate", frame_rate, 10.0);
         private_nh.param<bool>("Camera/Trigger", trigger_mode, false);
         private_nh.param<int>("Camera/Tigger_line", trigger_line, 2);
@@ -70,6 +115,7 @@ namespace HIKCAMERA
         private_nh.param<float>("Camera/Gamma_value", Gamma_value, 1.0);
         private_nh.param<int>("Camera/Gamma_selector", Gamma_selector, 1);
         private_nh.param<bool>("Camera/Exposure_control", exposure_control, false);
+        private_nh.param<std::string>("Camera/pixel_format", pixel_format_str, "BayerGB10");
         
         // Offset parameters
     int offsetX, offsetY;
@@ -195,7 +241,9 @@ namespace HIKCAMERA
         setEnumValue("BalanceWhiteAuto", MV_BALANCEWHITE_AUTO_CONTINUOUS);
         ROS_INFO_STREAM("BalanceWhiteAuto set to Continuous");
         // Set Pixel Format (adjust according to camera support)
-        setEnumValue("PixelFormat", PixelType_Gvsp_BayerGB10);
+        unsigned int pixel_format = getPixelFormatFromString(pixel_format_str);
+        setEnumValue("PixelFormat", pixel_format);
+        ROS_INFO_STREAM("PixelFormat set to " << pixel_format_str << " (value: " << pixel_format << ")");
         // Set Brightness
         setIntValue("Brightness", brightneess);
         ROS_INFO_STREAM("Brightness set to " << brightneess);
